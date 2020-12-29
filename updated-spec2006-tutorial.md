@@ -185,7 +185,7 @@ m5_binary = Artifact.registerArtifact(
 
 ### Building the Disk Image
 In this step, we will build the disk image using [packer](https://www.packer.io/).
-**Note:** If you are interested in modifying the SPEC configuration file, [Appendix I](#TODO) describes how the scripts that build the disk image work.
+**Note:** If you are interested in modifying the SPEC configuration file, [Appendix II](#TODO) describes how the scripts that build the disk image work.
 Also, more information about using packer and building disk images can be found [here](../main-doc/disks.md).
 
 First, we download the packer binary.
@@ -418,3 +418,18 @@ python3 launch_spec2006_experiment.py
 The results folder of each benchmark has a folder named `speclogs`, which contains the logs of the run spec commands. There are two logs in this folder: `CPU2006.001.log` and `CPU2006.002.log`. The former is the log of compiling SPEC benchmarks, which is generated when we compile SPEC benchmarks while we create the disk image. The latter is the log of the benchmark run. So, we only interest in `CPU2006.002.log`.
 
 If the benchmark run is successful, there will be a line starting with `Success: 1x` followed by `benchmark_name`. We will look for this line in each `CPU2006.002.log` file.
+
+## Appendix I. Working Status
+Not all benchmarks are compiled in the above set up as of March 2020.
+The working status of SPEC 2006 workloads is available here: [https://www.gem5.org/documentation/benchmark_status/gem5-20#spec-2006-tests](https://www.gem5.org/documentation/benchmark_status/gem5-20#spec-2006-tests).
+
+## Appendix II. Disk Image Generation Scripts
+`disk-image/spec-2006/install-spec2006.sh`: a Bash script that will be executed on the guest machine after Ubuntu Server is installed in the disk image; this script installs depedencies to compile and run SPEC workloads, mounts the SPEC ISO and installs the benchmark suite on the disk image, and creates a SPEC configuration from gcc42 template.
+
+
+`disk-image/spec-2006/post-installation.sh`: a script that will be executed on the guest machine; this script copies the `serial-getty@.service` file to the `systemd` folder, copies m5 binary to `/sbin`, and appends the content of `runscript.sh` to `.bashrc`.
+
+`disk-image/spec-2006/runscript.sh`: a script that will be copied to `.bashrc` on the disk image so that the commands in this script will be run immediately after the booting process.
+
+`disk-image/spec-2006/spec-2006.json`: contains a configuration telling Packer how the disk image should be built.
+
