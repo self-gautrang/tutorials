@@ -105,7 +105,14 @@ In the script above, we ignore files and folders that we use other gem5art Artif
 For example, `disk-image/packer` is the path to the packer binary which generates the disk image, and newer versions `packer` probably won't affect the content of the disk image.
 Another example is that we use another gem5art Artifact object to keep track of `vmlinux-4.19.83`, so we put the name of the file in the .gitignore file.
 
-You probably notice that there are more than one way of keeping track of the files in the experiment folder: either the git structure of the experiment will keep track of a file, or we can create a separate gem5art Artifact object to keep track of that file.
+**Note:** You probably notice that there are more than one way of keeping track of the files in the experiment folder: either the git structure of the experiment will keep track of a file, or we can create a separate gem5art Artifact object to keep track of that file.
+The decision of letting the git structure or creating a new Artifact object leads to different outcomes.
+The difference lies on the type of the Artifact object (specified by the `typ` parameter): for Artifact objects that has `typ` of `git repo`, gem5art won't upload the files in the git structure to gem5art's database, instead, it will only keep track of the hash of the HEAD commit of the git structure.
+However, for Artifact's that do **not** have `typ` that is `git repo`, the file specfied in the `path` parameter will be uploaded to the database.
+
+Essentially, we tend to keep small-size files (such as scripts and texts) in a git structure, and to keep large-size files (such as gem5 binaries and disk images) in Artifact's of type `gem5 binary` or `binary`.
+Another important difference is that gem5art does **not** keep track of files in a git Artifact, while it does upload other types of Artifact to its database.
+
 
 
 
