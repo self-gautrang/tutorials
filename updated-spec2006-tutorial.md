@@ -113,7 +113,308 @@ However, for Artifact's that do **not** have `typ` that is `git repo`, the file 
 Essentially, we tend to keep small-size files (such as scripts and texts) in a git structure, and to keep large-size files (such as gem5 binaries and disk images) in Artifact's of type `gem5 binary` or `binary`.
 Another important difference is that gem5art does **not** keep track of files in a git Artifact, while it does upload other types of Artifact to its database.
 
+### Building gem5
+In this step, we download the source code and build gem5 v20.1.0.2.
+In the root folder of the experiment,
+
+```sh
+git clone -b v20.1.0.2 https://gem5.googlesource.com/public/gem5
+cd gem5
+scons build/X86/gem5.opt -j8
+```
+
+We have two artifacts: one is the gem5 source code (the gem5 git repo), and the gem5 binary (`gem5.opt`).
+The documentation of this step would be how we get the source code and how we compile the gem5 binary.
+In `launch_spec2006_experiments.py`, we document the step in Artifact objects as follows,
+
+```python
+gem5_repo = Artifact.registerArtifact(
+    command = '''
+        git clone -b v20.1.0.2 https://gem5.googlesource.com/public/gem5
+        cd gem5
+        scons build/X86/gem5.opt -j8
+    ''',
+    typ = 'git repo',
+    name = 'gem5',
+    path =  'gem5/',
+    cwd = './',
+    documentation = 'cloned gem5 v20.1.0.2'
+)
 
 
+gem5_binary = Artifact.registerArtifact(
+    command = 'scons build/X86/gem5.opt -j8',
+    typ = 'gem5 binary',
+    name = 'gem5-20.1.0.2',
+    cwd = 'gem5/',
+    path =  'gem5/build/X86/gem5.opt',
+    inputs = [gem5_repo,],
+    documentation = 'compiled gem5 v20.1.0.2 binary'
+)
+```
 
+### Building m5
+m5 is a binary that facilitates the communication between the host system and the guest system (gem5).
+The use of the m5 binary will be demonstrated in the runscripts that we will describe later.
+m5 binary will be copied to the disk image so that the guest could run m5 binary during the simulation.
+m5 binary should be compiled before we build the disk image.
 
+**Note:** it's important to compile the m5 binary with -DM5_ADDR=0xFFFF0000 as is default in the SConscript.
+If you don't compile with -DM5_ADDR and try to run with KVM, you'll get an illegal instruction error.
+
+To compile m5 binary, in the root folder of the experiment,
+
+```sh
+cd gem5/util/m5/
+scons build/x86/out/m5
+```
+
+In `launch_spec2006_experiments.py`, we document the step in an Artifact object as follows,
+
+```python
+m5_binary = Artifact.registerArtifact(
+    command = 'scons build/x86/out/m5',
+    typ = 'binary',
+    name = 'm5',
+    path =  'gem5/util/m5/build/x86/out/m5',
+    cwd = 'gem5/util/m5',
+    inputs = [gem5_repo,],
+    documentation = 'm5 utility'
+)
+```
+
+### Building the Disk Image
+In this step, we will build the disk image using [packer](https://www.packer.io/).
+**Note:** If you are interested in modifying the SPEC configuration file, [Appendix I](#TODO) describes how the scripts that build the disk image work.
+Also, more information about using packer and building disk images can be found [here](../main-doc/disks.md).
+
+First, we download the packer binary.
+The current version of packer as of December 2020 is 1.6.6.
+
+```sh
+cd disk-image/
+wget https://releases.hashicorp.com/packer/1.6.6/packer_1.6.6_linux_amd64.zip
+unzip packer_1.6.6_linux_amd64.zip
+rm packer_1.6.6_linux_amd64.zip
+```
+
+In `launch_spec2006_experiments.py`, we document how we obtain the binary as follows,
+
+```python
+packer = Artifact.registerArtifact(
+    command = '''
+        wget https://releases.hashicorp.com/packer/1.6.6/packer_1.6.6_linux_amd64.zip;
+        unzip packer_1.6.6_linux_amd64.zip;
+    ''',
+    typ = 'binary',
+    name = 'packer',
+    path =  'disk-image/packer',
+    cwd = 'disk-image',
+    documentation = 'Program to build disk images. Downloaded from https://www.packer.io/.'
+)
+```
+
+Second, we build the disk image.
+The script `disk-image/spec-2006/spec-2006.json` specifies how the disk image is built.
+In this step, we assume the SPEC 2006 ISO file is in the `disk-image/spec-2006` folder and the ISO file name is `CPU2006v1.0.1.iso`.
+The path and the name of the ISO file could be changed in the JSON file.
+
+To build the disk image, in the root folder of the experiment,
+
+```sh
+cd disk-image/
+./packer validate spec-2006/spec-2006.json # validate the script, including checking the input files
+./packer build spec-2006/spec-2006.json
+```
+
+The process should take about than an hour to complete on a fairly recent machine with a cable internet speed.
+The disk image will be in `disk-image/spec-2006/spec-2006-image/spec-2006`.
+
+**Note:** Packer will output a VNC port that could be used to inspect the building process.
+
+**Note:** [More about using packer and building disk images](../main-doc/disks.md).
+
+Now, in `launch_spec2006_experiments.py`, we make an Artifact object of the disk image.
+
+```python
+disk_image = Artifact.registerArtifact(
+    command = './packer build spec-2006/spec-2006.json',
+    typ = 'disk image',
+    name = 'spec-2006',
+    cwd = 'disk-image/',
+    path = 'disk-image/spec-2006/spec-2006-image/spec-2006',
+    inputs = [packer, experiments_repo, m5_binary,],
+    documentation = 'Ubuntu Server with SPEC 2006 installed, m5 binary installed and root auto login'
+)
+```
+
+### Obtaining a Compiled Linux Kernel that Works with gem5
+The compiled Linux kernel binaries that is known to work with gem5 can be found here: [https://www.gem5.org/documentation/general_docs/gem5_resources/](https://www.gem5.org/documentation/general_docs/gem5_resources/).
+
+The Linux kernel configurations that are used to compile the Linux kernel binaries are documented and maintained in gem5-resources: [https://gem5.googlesource.com/public/gem5-resources/+/cee972a1727abd80924dad73d9f3b5cf0f13012d/src/linux-kernel/](https://gem5.googlesource.com/public/gem5-resources/+/cee972a1727abd80924dad73d9f3b5cf0f13012d/src/linux-kernel/).
+
+The following command downloads the compiled Linux kernel of version 4.19.83.
+In the root folder of the experiment,
+
+```sh
+wget http://dist.gem5.org/dist/v20-1/kernels/x86/static/vmlinux-4.19.83
+```
+
+Now, `in launch_spec2006_experiments.py`, we make an Artifact object of the Linux kernel binary.
+
+```python
+linux_binary = Artifact.registerArtifact(
+    name = 'vmlinux-4.19.83',
+    typ = 'kernel',
+    path = '/vmlinux-4.19.83',
+    cwd = './',
+    command = ''' wget http://dist.gem5.org/dist/v20-1/kernels/x86/static/vmlinux-4.19.83''',
+    inputs = [experiments_repo,],
+    documentation = "kernel binary for v4.19.83",
+)
+```
+
+### gem5 System Configurations
+The gem5 system configurations can be found in the `configs/` folder.
+The gem5 run script located in `configs/run_spec.py`, takes the following parameters:
+* --kernel: (required) the path to vmlinux file.
+* --disk: (required) the path to spec image.
+* --cpu: (required) name of the detailed CPU model.
+Currently, we are supporting the following CPU models: kvm, o3, atomic, timing.
+More CPU models could be added to getDetailedCPUModel() in run_spec.py.
+* --benchmark: (required) name of the SPEC CPU 2006 benchmark.
+The availability of the benchmarks could be found at the end of the tutorial.
+* --size: (required) size of the benchmark. There are three options: ref, train, test.
+* --no-copy-logs: this is an optional parameter specifying whether the spec log files should be copied to the host system.
+* --allow-listeners: this is an optional parameter specifying whether gem5 should open ports so that gdb or telnet could connect to. No listeners are allowed by default.
+
+We don't use another Artifact object to document this file.
+The Artifact repository object of the root folder will keep track of the changes of the script.
+
+**Note:** The first two parameters of the gem5 run script for full system simulation should always be the path to the linux binary and the path to the disk image, in that order.
+
+## Running the Experiment
+### Setting up the Python virtual environment
+gem5art code works with Python 3.5 or above.
+
+The following script will set up a python3 virtual environment named gem5art-env. In the root folder of the experiment,
+
+```sh
+virtualenv -p python3 gem5art-env
+```
+
+To activate the virtual environment, in the root folder of the experiment,
+
+```sh
+source gem5art-env/bin/activate
+```
+
+To install the gem5art dependency (this should be done when we are in the virtual environment),
+
+```sh
+pip install gem5art-artifact gem5art-run gem5art-tasks
+```
+
+To exit the virtual environment,
+
+```sh
+deactivate
+```
+
+**Note:** the following steps should be done while using the Python virtual environment.
+
+### Running the Database Server
+The following script will run the MongoDB database server in a docker container.
+
+The -p 27017:27017 option maps the port 27017 in the container to port 27017 on the host.
+The -v /path/in/host:/data/db option mounts the /data/db folder in the docker container to the folder /path/in/host in the host.
+The path of the host folder should an absoblute path, and the database files created by MongoDB will be in that folder.
+The --name mongo-1 option specifies the name of the docker container.
+We can use this name to identify to the container.
+The -d option will let the container run in the background.
+mongo is the name of [the offical mongo image](https://hub.docker.com/_/mongo).
+
+```sh
+docker run -p 27017:27017 -v /path/in/host:/data/db --name mongo-1 -d mongo
+```
+
+### Running Celery Server
+Inisde the path in the host specified above,
+
+```sh
+celery -E -A gem5art.tasks.celery worker --autoscale=[number of workers],0
+```
+
+### Creating the Launch Script Running the Experiment
+Now, we can put together the run script!
+In launch_spec2006_experiments.py, we import the required modules and classes at the beginning of the file,
+
+```python
+import os
+import sys
+from uuid import UUID
+
+from gem5art.artifact import Artifact
+from gem5art.run import gem5Run
+from gem5art.tasks.tasks import run_gem5_instance
+```
+
+And then, we put the launch function at the end of launch_spec2006_experiments.py,
+
+```python
+if __name__ == "__main__":
+    cpus = ['kvm', 'atomic', 'o3', 'timing']
+    benchmark_sizes = {'kvm':    ['test', 'ref'],
+                       'atomic': ['test'],
+                       'o3':     ['test'],
+                       'timing': ['test']
+                      }
+    benchmarks = ['401.bzip2','403.gcc','410.bwaves','416.gamess','429.mcf',
+                  '433.milc','434.zeusmp','435.gromacs','436.cactusADM',
+                  '437.leslie3d','444.namd','445.gobmk','453.povray',
+                  '454.calculix','456.hmmer','458.sjeng','459.GemsFDTD',
+                  '462.libquantum','464.h264ref','465.tonto','470.lbm',
+                  '471.omnetpp','473.astar','481.wrf','482.sphinx3',
+                  '998.specrand','999.specrand']
+    # unavailable benchmarks: 400.perlbench,447.dealII,450.soplex,483.xalancbmk
+
+    for cpu in cpus:
+        for size in benchmark_sizes[cpu]:
+            for benchmark in benchmarks:
+                run = gem5Run.createFSRun(
+                    'gem5 20.1.0.2 spec 2006 experiment',
+                    'gem5/build/X86/gem5.opt', # gem5_binary
+                    'gem5-configs/run_spec.py', # run_script
+                    'results/{}/{}/{}'.format(cpu, size, benchmark), # relative_outdir
+                    gem5_binary, # gem5_artifact
+                    gem5_repo, # gem5_git_artifact
+                    run_script_repo, # run_script_git_artifact
+                    vmlinux-4.19.83', # linux_binary
+                    'disk-image/spec-2006/spec-2006-image/spec-2006', # disk_image
+                    linux_binary, # linux_binary_artifact
+                    disk_image, # disk_image_artifact
+                    cpu, benchmark, size, # params
+                    timeout = 5 * 24 * 60 * 60 # 5 days
+                )
+                run_gem5_instance.apply_async((run,))
+
+```
+The above launch function will run the all the available benchmarks with kvm, atomic, timing, and o3 cpus.
+For kvm, both test and ref sizes will be run, while for the rest, only benchmarks of size test will be run.
+
+Note that the line `'results/{}/{}/{}'.format(cpu, size, benchmark), # relative_outdir` specifies how the results folder is structured.
+The results folder should be carefully structured so that there does not exist two gem5 runs write to the same place.
+
+### Run the Experiment
+Having celery and mongoDB servers running, we can start the experiment.
+
+In the root folder of the experiment,
+
+```sh
+python3 launch_spec2006_experiment.py
+```
+
+## Getting the Results
+The results folder of each benchmark has a folder named `speclogs`, which contains the logs of the run spec commands. There are two logs in this folder: `CPU2006.001.log` and `CPU2006.002.log`. The former is the log of compiling SPEC benchmarks, which is generated when we compile SPEC benchmarks while we create the disk image. The latter is the log of the benchmark run. So, we only interest in `CPU2006.002.log`.
+
+If the benchmark run is successful, there will be a line starting with `Success: 1x` followed by `benchmark_name`. We will look for this line in each `CPU2006.002.log` file.
